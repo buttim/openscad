@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <QString>
 #include <QChar>
+#include "boosty.h"
 #include "scintillaeditor.h"
 #include <Qsci/qscicommandset.h>
 #include "Preferences.h"
@@ -109,6 +110,25 @@ const boost::property_tree::ptree & EditorColorScheme::propertyTree() const
 	return pt;
 }
 
+void ScintillaEditor::loadAbbreviations(const fs::path path)
+{
+	fs::path filepath = path / "abbrev.json";
+	boost::property_tree::ptree pt;
+	try {
+		boost::property_tree::read_json(filepath.generic_string(), pt);
+		for (boost::property_tree::ptree::iterator it=pt.begin();it!=pt.end();it++)
+		{
+			QString key=it->first.c_str(),
+				left=it->second.get_child("l").get_value<std::string>().c_str(),
+				right=it->second.get_child("r").get_value<std::string>().c_str();
+			
+			abbreviations[key]=Abbreviation(key,left,right);
+		}
+	} catch (const std::exception & e) {
+		PRINTB("Error reading abbreviations file '%s': %s", path.generic_string() % e.what());
+	}
+}
+
 ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 {
 	scintillaLayout = new QVBoxLayout(this);
@@ -116,6 +136,12 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 
 	// Force EOL mode to Unix, since QTextStream will manage local EOL modes.
 	qsci->setEolMode(QsciScintilla::EolUnix);
+	qsci->setAutoCompletionUseSingle(QsciScintilla::AcusExplicit);
+	qsci->setAutoCompletionFillupsEnabled(true);
+	qsci->setAutoCompletionFillups("(");
+	
+	loadAbbreviations(PlatformUtils::resourceBasePath());
+	loadAbbreviations(PlatformUtils::userConfigPath());
 
 	//
 	// Remapping some scintilla key binding which conflict with OpenSCAD global
@@ -148,9 +174,24 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 	qsci->setFolding(QsciScintilla::BoxedTreeFoldStyle, 4);
 
 	this->lexer = new ScadLexer(this);
+	api=new QsciAPIs(lexer);
+	try {
+		if (!api->load((fs::path(PlatformUtils::resourceBasePath()) / "scad.api").generic_string().c_str()))
+			PRINTB("Something went wrong while trying to load The APIs file","");
+		else
+			api->prepare();
+	} catch (std::exception e) {
+		PRINTB("Something went wrong while trying to load The APIs file (%s)",e.what());
+	}
+
 	qsci->setLexer(this->lexer);
 	initMargin();
 
+	qsci->setCallTipsVisible(10);
+	qsci->setCallTipsStyle(QsciScintilla::CallTipsContext);
+
+	qsci->setLexer(this->lexer);
+	
 	connect(qsci, SIGNAL(textChanged()), this, SIGNAL(contentsChanged()));
 	connect(qsci, SIGNAL(modificationChanged(bool)), this, SIGNAL(modificationChanged(bool)));
 	qsci->installEventFilter(this);
@@ -292,6 +333,13 @@ void ScintillaEditor::setColormap(const EditorColorScheme *colorScheme)
 			newLexer->setKeywords(3, readString(keywords.get(), "keyword-set-doc", ""));
 			newLexer->setKeywords(4, readString(keywords.get(), "keyword-set3", ""));
 		}
+
+		delete api;
+		api=new QsciAPIs(newLexer);
+		if (!api->load((fs::path(PlatformUtils::resourceBasePath()) / "scad.api").generic_string().c_str()))
+			PRINTB("Something went wrong while trying to load The APIs file","");
+		else
+			api->prepare();
 
 		qsci->setLexer(newLexer);
 		delete this->lexer;
@@ -482,6 +530,59 @@ void ScintillaEditor::initFont(const QString& fontName, uint size)
   this->lexer->setFont(this->currentFont);
   qsci->setMarginsFont(this->currentFont);
   onTextChanged(); // Update margin width
+}
+
+void ScintillaEditor::expandAbbreviation()
+{
+	int line, index;
+	qsci->getCursorPosition(&line, &index);
+	QString text=qsci->text(line),
+		left=text.left(index);
+
+	if (left.isEmpty()) return;
+	
+	QMap<QString,Abbreviation>::iterator it=abbreviations.find(QString(left[left.length()-1].toLatin1()));
+	if (it==abbreviations.end())
+		return;
+	
+	qsci->setSelection(line, index-1, line, index);
+	qsci->replaceSelectedText(it->left());
+	qsci->getCursorPosition(&line, &index);
+	qsci->replaceSelectedText(it->right());
+	qsci->setCursorPosition(line, index);
+}
+
+void ScintillaEditor::toggleCurrentFold()
+{
+	int line, index;
+	qsci->getCursorPosition(&line, &index);
+	qsci->foldLine(line);
+}
+
+void ScintillaEditor::toggleAllFolds()
+{
+	qsci->foldAll();
+}
+
+void ScintillaEditor::completeWord()
+{
+	qsci->autoCompleteFromDocument();
+}
+
+void ScintillaEditor::completeSymbol()
+{
+	int lineBefore, indexBefore,
+		lineAfter, indexAfter;
+
+	qsci->getCursorPosition(&lineBefore, &indexBefore);
+	qsci->autoCompleteFromAPIs();
+	
+	//HACK: removal of unwanted trailing space added by QScintilla for no reason when using AcusExplicit
+	qsci->getCursorPosition(&lineAfter, &indexAfter);
+	if (lineBefore==lineAfter && indexBefore!=indexAfter && indexAfter>1) {
+		qsci->setSelection(lineAfter,indexAfter-1,lineAfter,indexAfter);
+		qsci->replaceSelectedText("");
+	}
 }
 
 void ScintillaEditor::initMargin()

@@ -1,0 +1,33 @@
+cube?1(size) MODULE
+cube?1(size=[width,depth,height]) MODULE
+cylinder?1(radius,height) MODULE
+difference ?1() MODULE
+intersection ?1() MODULE
+matrix?1() MODULE
+rotate?1([]) MODULE
+sphere?1(d=diameter) MODULE
+sphere?1(r=radius) MODULE
+translate?1([]) MODULE
+union?1() MODULE
+abs?2(number) FUNCTION
+sign?2(number) FUNCTION
+sin?2(degrees) FUNCTION
+cos?2(degrees) FUNCTION
+tan?2(degrees) FUNCTION
+acos?2(number) FUNCTION
+asin?2(number) FUNCTION
+atan?2(number) FUNCTION
+atan2?2(number, number) FUNCTION
+floor?2(number) FUNCTION
+round?2(number) FUNCTION
+ceil?2(number) FUNCTION
+ln?2(number) FUNCTION
+len?2(string) FUNCTION
+log?2(number) FUNCTION
+pow?2(base, exponent) FUNCTION
+sqrt?2(number) FUNCTION
+exp?2(number) FUNCTION
+rands?2(min, max, num_results) FUNCTION
+min?2(number, number, ...) FUNCTION
+max?2(number, number, ...) FUNCTION
+
